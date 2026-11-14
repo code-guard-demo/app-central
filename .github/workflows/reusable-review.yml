@@ -63,6 +63,11 @@ on:
         required: false
         type: string
         default: "@org/reviewer-oncall"
+      allowed_user:
+        description: "Restrict PR reviews and @ai-review replies to this GitHub login (empty = allow collaborators)"
+        required: false
+        type: string
+        default: "aethv"
     secrets:
       ANTHROPIC_API_KEY:
         required: false
@@ -98,10 +103,20 @@ jobs:
           UI_PATHS: ${{ inputs.ui_paths }}
           IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
           SIMULATE_FORK: ${{ inputs.simulate_fork }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          ALLOWED_USER: ${{ inputs.allowed_user }}
         run: |
           set -euo pipefail
           if [ "$IS_FORK" = "true" ] || [ "$SIMULATE_FORK" = "true" ]; then
             echo "::notice::Skipping AI review for fork PR by security policy (secrets are not exposed to forks)."
+            echo "has_code=false" >> "$GITHUB_OUTPUT"
+            echo "touches_db=false" >> "$GITHUB_OUTPUT"
+            echo "touches_ui=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "$ALLOWED_USER" ] && [ "$PR_AUTHOR" != "$ALLOWED_USER" ]; then
+            echo "::notice::Closing unauthorized PR from $PR_AUTHOR (only $ALLOWED_USER is allowed)."
+            gh pr close "$PR_NUMBER" --repo "$REPO" --comment "Closed automatically: this repository only accepts pull requests from @$ALLOWED_USER." || true
             echo "has_code=false" >> "$GITHUB_OUTPUT"
             echo "touches_db=false" >> "$GITHUB_OUTPUT"
             echo "touches_ui=false" >> "$GITHUB_OUTPUT"
@@ -331,9 +346,15 @@ jobs:
           COMMENT_LINE: ${{ github.event.comment.line || github.event.comment.original_line }}
           COMMENT_USER: ${{ github.event.comment.user.login }}
           AUTHOR_ASSOC: ${{ github.event.comment.author_association }}
+          ALLOWED_USER: ${{ inputs.allowed_user }}
         run: |
           set -euo pipefail
           echo "Event=$EVENT_NAME user=$COMMENT_USER author_association=$AUTHOR_ASSOC"
+          if [ -n "$ALLOWED_USER" ] && [ "$COMMENT_USER" != "$ALLOWED_USER" ]; then
+            echo "::notice::Ignoring @ai-review comment from $COMMENT_USER (only $ALLOWED_USER is allowed)."
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           case "$AUTHOR_ASSOC" in
             OWNER|MEMBER|COLLABORATOR) ;;
             *)
