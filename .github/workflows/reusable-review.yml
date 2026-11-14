@@ -7,6 +7,10 @@ on:
         required: false
         type: string
         default: "claude"
+      central_ref:
+        required: false
+        type: string
+        default: "main"
       model:
         required: false
         type: string
@@ -14,6 +18,8 @@ on:
     secrets:
       ANTHROPIC_API_KEY:
         required: false
+      SKILLS_REPO_TOKEN:
+        required: true
 
 permissions:
   contents: read
@@ -31,6 +37,26 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Pull central rules
+        uses: actions/checkout@v4
+        with:
+          repository: code-guard-demo/app-central
+          ref: ${{ inputs.central_ref }}
+          token: ${{ secrets.SKILLS_REPO_TOKEN }}
+          path: .ai-central
+
+      - name: Install central rules (append to local if present)
+        run: |
+          set -euo pipefail
+          if [ -f AGENTS.md ]; then
+            { cat .ai-central/AGENTS.md; printf '\n\n## Repository-specific rules\n\n'; cat AGENTS.md; } > /tmp/AGENTS.merged.md
+            mv /tmp/AGENTS.merged.md AGENTS.md
+          else
+            cp .ai-central/AGENTS.md AGENTS.md
+          fi
+          [ -f CLAUDE.md ] || cp .ai-central/CLAUDE.md CLAUDE.md
+          rm -rf .ai-central
+
       - name: Claude review
         if: inputs.provider == 'claude'
         uses: anthropics/claude-code-action@v1
@@ -45,7 +71,8 @@ jobs:
             Use `gh pr diff` to read the diff. Do NOT post comments yourself.
             Write your review in markdown to the file `ai-review.md` in the
             current directory. If you find no real problems, say so briefly.
-            Do not comment on style. Start with the line "[central v0.3]".
+            Follow all rules in AGENTS.md (scope, severity, output format).
+            Start with the line "[central v0.4]".
           claude_args: |
             --max-turns 8
             --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob,Write"
