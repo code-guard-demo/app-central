@@ -1,0 +1,78 @@
+[
+  {
+    "id": "01-off-by-one",
+    "skills": [],
+    "diff": "diff --git a/sum.js b/sum.js\nnew file mode 100644\nindex 0000000..1111111\n--- /dev/null\n+++ b/sum.js\n@@ -0,0 +1,9 @@\n+function average(arr) {\n+  if (!Array.isArray(arr) || arr.length === 0) return 0;\n+  let total = 0;\n+  for (let i = 0; i <= arr.length; i++) {\n+    total += arr[i];\n+  }\n+  return total / arr.length;\n+}\n+module.exports = { average };\n",
+    "expected": [
+      { "file": "sum.js", "line": 4, "description": "off-by-one loop condition i <= arr.length" }
+    ]
+  },
+  {
+    "id": "02-null-deref",
+    "skills": [],
+    "diff": "diff --git a/user.js b/user.js\nnew file mode 100644\nindex 0000000..1111111\n--- /dev/null\n+++ b/user.js\n@@ -0,0 +1,5 @@\n+function formatDisplayName(user) {\n+  const prefix = 'User: ';\n+  return prefix + user.profile.name.toLowerCase();\n+}\n+module.exports = { formatDisplayName };\n",
+    "expected": [
+      { "file": "user.js", "line": 3, "description": "unguarded dereference of user.profile.name" }
+    ]
+  },
+  {
+    "id": "03-console-log",
+    "skills": [],
+    "diff": "diff --git a/auth.js b/auth.js\nnew file mode 100644\nindex 0000000..1111111\n--- /dev/null\n+++ b/auth.js\n@@ -0,0 +1,7 @@\n+function verifyToken(token, expected) {\n+  if (typeof token !== 'string' || typeof expected !== 'string') return false;\n+  const ok = token === expected;\n+  console.log('debug token', token);\n+  return ok;\n+}\n+module.exports = { verifyToken };\n",
+    "expected": [
+      { "file": "auth.js", "line": 4, "description": "leftover console.log in non-test source" }
+    ]
+  },
+  {
+    "id": "04-sql-injection",
+    "skills": ["db"],
+    "diff": "diff --git a/db/repositories/users.js b/db/repositories/users.js\nnew file mode 100644\nindex 0000000..1111111\n--- /dev/null\n+++ b/db/repositories/users.js\n@@ -0,0 +1,6 @@\n+async function findUserByEmail(db, email) {\n+  if (typeof email !== 'string') return null;\n+  const sql = \"SELECT id, email FROM users WHERE email = '\" + email + \"' LIMIT 1\";\n+  return db.query(sql);\n+}\n+module.exports = { findUserByEmail };\n",
+    "expected": [
+      { "file": "db/repositories/users.js", "line": 3, "description": "SQL injection via string concatenation" }
+    ]
+  },
+  {
+    "id": "05-index-non-concurrent",
+    "skills": ["db"],
+    "diff": "diff --git a/db/migrations/002_idx.sql b/db/migrations/002_idx.sql\nnew file mode 100644\nindex 0000000..1111111\n--- /dev/null\n+++ b/db/migrations/002_idx.sql\n@@ -0,0 +1,2 @@\n+CREATE INDEX IF NOT EXISTS idx_orders_user ON orders (user_id);\n+-- Down: DROP INDEX CONCURRENTLY IF EXISTS idx_orders_user;\n",
+    "expected": [
+      { "file": "db/migrations/002_idx.sql", "line": 1, "description": "CREATE INDEX without CONCURRENTLY" }
+    ]
+  },
+  {
+    "id": "06-drop-column",
+    "skills": ["db"],
+    "diff": "diff --git a/db/migrations/003_drop.sql b/db/migrations/003_drop.sql\nnew file mode 100644\nindex 0000000..1111111\n--- /dev/null\n+++ b/db/migrations/003_drop.sql\n@@ -0,0 +1,2 @@\n+ALTER TABLE accounts DROP COLUMN status;\n+-- Down: ALTER TABLE accounts ADD COLUMN status text;\n",
+    "expected": [
+      { "file": "db/migrations/003_drop.sql", "line": 1, "description": "DROP COLUMN without expand/contract rollout" }
+    ]
+  },
+  {
+    "id": "07-ui-xss",
+    "skills": ["ui"],
+    "diff": "diff --git a/src/components/Bio.tsx b/src/components/Bio.tsx\nnew file mode 100644\nindex 0000000..1111111\n--- /dev/null\n+++ b/src/components/Bio.tsx\n@@ -0,0 +1,5 @@\n+export function Bio({ bio }: { bio: string }) {\n+  return (\n+    <div dangerouslySetInnerHTML={{ __html: bio }} />\n+  );\n+}\n",
+    "expected": [
+      { "file": "src/components/Bio.tsx", "line": 3, "description": "dangerouslySetInnerHTML XSS risk" }
+    ]
+  },
+  {
+    "id": "08-ui-a11y-img",
+    "skills": ["ui"],
+    "diff": "diff --git a/src/components/Avatar.tsx b/src/components/Avatar.tsx\nnew file mode 100644\nindex 0000000..1111111\n--- /dev/null\n+++ b/src/components/Avatar.tsx\n@@ -0,0 +1,5 @@\n+export function Avatar({ url }: { url: string }) {\n+  return (\n+    <img src={url} />\n+  );\n+}\n",
+    "expected": [
+      { "file": "src/components/Avatar.tsx", "line": 3, "description": "img without alt attribute" }
+    ]
+  },
+  {
+    "id": "09-clean-clamp",
+    "skills": [],
+    "diff": "diff --git a/clamp.js b/clamp.js\nnew file mode 100644\nindex 0000000..1111111\n--- /dev/null\n+++ b/clamp.js\n@@ -0,0 +1,8 @@\n+function clamp(value, min, max) {\n+  if (typeof value !== 'number' || Number.isNaN(value)) return min;\n+  if (min > max) throw new RangeError('min must be <= max');\n+  if (value < min) return min;\n+  if (value > max) return max;\n+  return value;\n+}\n+module.exports = { clamp };\n",
+    "expected": []
+  },
+  {
+    "id": "10-clean-migration",
+    "skills": ["db"],
+    "diff": "diff --git a/db/migrations/004_safe.sql b/db/migrations/004_safe.sql\nnew file mode 100644\nindex 0000000..1111111\n--- /dev/null\n+++ b/db/migrations/004_safe.sql\n@@ -0,0 +1,3 @@\n+-- non-transactional migration\n+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_sessions_user_id ON sessions (user_id);\n+-- Down: DROP INDEX CONCURRENTLY IF EXISTS idx_sessions_user_id;\n",
+    "expected": []
+  }
+]
