@@ -175,7 +175,12 @@ jobs:
         if: inputs.provider == 'gemini'
         id: gemini
         uses: google-github-actions/run-gemini-cli@v0.1.22
+        env:
+          # Headless runs need an explicit trust decision. We overwrite project
+          # settings below so a PR cannot inject its own .gemini/settings.json.
+          GEMINI_CLI_TRUST_WORKSPACE: "true"
         with:
+          settings: '{"telemetry":{"enabled":false}}'
           gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
           gemini_model: ${{ inputs.model }}
           prompt: |
@@ -201,5 +206,5 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          HEADER: "[central v0.6 | CI: ${{ needs.ci.result == 'success' && needs.ci.outputs.result || 'not run' }}]"
+          HEADER: "[central ${{ inputs.central_ref }} | ${{ inputs.provider }} | CI: ${{ needs.ci.result == 'success' && needs.ci.outputs.result || 'not run' }}]"
         run: node /tmp/ai-scripts/post-review.js findings.json
