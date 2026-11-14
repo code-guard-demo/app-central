@@ -23,6 +23,9 @@ permissions:
 jobs:
   review:
     runs-on: ubuntu-latest
+    concurrency:
+      group: ai-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,9 +42,27 @@ jobs:
             PR NUMBER: ${{ github.event.pull_request.number }}
 
             Review this pull request's diff for bugs. Be concise.
-            Use `gh pr diff` to read the diff. Post one summary comment with
-            `gh pr comment`. If you find no real problems, say so briefly.
-            Do not comment on style. Start your comment with the line "[central v0.2]".
+            Use `gh pr diff` to read the diff. Do NOT post comments yourself.
+            Write your review in markdown to the file `ai-review.md` in the
+            current directory. If you find no real problems, say so briefly.
+            Do not comment on style. Start with the line "[central v0.3]".
           claude_args: |
             --max-turns 8
-            --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Read,Grep,Glob"
+            --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob,Write"
+
+      - name: Post or update sticky comment
+        if: always() && hashFiles('ai-review.md') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          { echo '<!-- ai-review -->'; cat ai-review.md; } > body.md
+          ID=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
+            --jq '.[] | select(.body | contains("<!-- ai-review -->")) | .id' | head -1)
+          if [ -n "$ID" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$ID" -F body=@body.md > /dev/null
+          else
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file body.md
+          fi
