@@ -48,6 +48,21 @@ on:
         required: false
         type: number
         default: 500
+      auto_merge:
+        description: "Auto-merge PR when review passes with confidence > score_threshold"
+        required: false
+        type: boolean
+        default: true
+      score_threshold:
+        description: "Minimum effective confidence (0-100) required to auto-merge"
+        required: false
+        type: number
+        default: 80
+      escalation_tag:
+        description: "Mention tag when review is unsure and escalates"
+        required: false
+        type: string
+        default: "@org/reviewer-oncall"
     secrets:
       ANTHROPIC_API_KEY:
         required: false
@@ -57,7 +72,7 @@ on:
         required: false
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
   issues: write
 
@@ -274,6 +289,13 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           HEADER: "[central ${{ inputs.central_ref }} | ${{ inputs.provider }} | skills: ${{ steps.skills.outputs.names }} | CI: ${{ needs.ci.result == 'success' && needs.ci.outputs.result || 'not run' }}${{ steps.diff.outputs.diff_note }}]"
+          CI_RESULT: ${{ needs.ci.result == 'success' && needs.ci.outputs.result || 'not run' }}
+          TOUCHES_DB: ${{ needs.gate.outputs.touches_db }}
+          DIFF_TRUNCATED: ${{ steps.diff.outputs.truncated }}
+          AUTO_MERGE: ${{ inputs.auto_merge }}
+          SCORE_THRESHOLD: ${{ inputs.score_threshold }}
+          ESCALATION_TAG: ${{ inputs.escalation_tag }}
+          DB_ESCALATION_TAG: ${{ inputs.db_escalation }}
         run: node /tmp/ai-scripts/post-review.js findings.json
 
   # ---------------------------------------------------------

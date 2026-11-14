@@ -101,8 +101,9 @@ if (require.main === module) {
   fs.writeFileSync(outFile, res.diff);
   console.log(`Diff lines: raw=${res.totalLines} keptOriginal=${res.keptOriginalLines} final=${res.keptLines} ignored=${res.ignored.length} truncated=${res.truncated}`);
   if (process.env.GITHUB_OUTPUT) {
-    fs.appendFileSync(process.env.GITHUB_OUTPUT, `diff_note=${res.note}\n`);
+    fs.appendFileSync(process.env.GITHUB_OUTPUT, `diff_note=${res.note}\ntruncated=${res.truncated}\n`);
   }
 }
 
 module.exports = { isIgnoredPath, filterDiff };
+

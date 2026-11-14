@@ -18,13 +18,15 @@ Write ONLY a JSON object (no prose, no code fences) to `findings.json`:
 ```
 {
   "summary": "<one sentence verdict>",
+  "confidence": 90,
   "findings": [
     {"file": "path/relative/to/repo.ext", "line": 12, "severity": "BLOCKER|WARNING|NIT", "message": "<problem>. Fix: <suggestion>."}
   ]
 }
 ```
 - `line` is the line number in the NEW version of the file, ideally a changed line.
-- If there are no findings, use `"findings": []` and `"summary": "No issues found."`.
+- `confidence` is an integer `0–100` estimating safety to auto-merge without human review: use `85–100` when there are no `BLOCKER`/`WARNING` findings and the change is small, clear, and safe; use `0–80` when anything is uncertain, ambiguous, architectural/high-risk, or has warnings/blockers.
+- If there are no findings, use `"findings": []`, `"confidence": 95` (when clearly safe), and `"summary": "No issues found."`.
 
 ## Project conventions
 - Flag any `console.log` left in non-test source files as a WARNING.

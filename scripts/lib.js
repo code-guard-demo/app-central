@@ -26,7 +26,7 @@ function extractJson(text) {
   return undefined;
 }
 
-// Returns { ok, summary, findings, dropped, error }
+// Returns { ok, summary, confidence, findings, dropped, error }
 function parseFindings(text) {
   const data = extractJson(text);
   if (data === undefined || data === null || typeof data !== 'object' || Array.isArray(data)) {
@@ -52,7 +52,78 @@ function parseFindings(text) {
       message: sanitize(f.message),
     });
   }
-  return { ok: true, summary: sanitize(data.summary), findings, dropped };
+  const confidence = typeof data.confidence === 'number' && Number.isFinite(data.confidence)
+    ? Math.max(0, Math.min(100, Math.round(data.confidence)))
+    : (findings.length === 0 ? 90 : 50);
+  return { ok: true, summary: sanitize(data.summary), confidence, findings, dropped };
+}
+
+/**
+ * Computes AUTO_MERGE vs ESCALATE vs BLOCK using deterministic risk caps so
+ * raw LLM confidence alone cannot force an unsafe merge.
+ */
+function evaluateDecision({
+  findings = [],
+  rawConfidence = 90,
+  ciResult = 'success',
+  truncated = false,
+  touchesDb = false,
+  threshold = 80,
+  escalationTag = '@org/reviewer-oncall',
+  dbEscalationTag = '@org/db-admins',
+} = {}) {
+  let effectiveConfidence = typeof rawConfidence === 'number' && Number.isFinite(rawConfidence)
+    ? Math.max(0, Math.min(100, Math.round(rawConfidence)))
+    : 0;
+  const reasons = [];
+
+  const ciFailed = ciResult === 'failure';
+  const hasBlocker = findings.some((f) => f.severity === 'BLOCKER');
+  const hasWarning = findings.some((f) => f.severity === 'WARNING');
+
+  if (ciFailed) {
+    effectiveConfidence = 0;
+    reasons.push('CI failed');
+  }
+  if (hasBlocker) {
+    effectiveConfidence = 0;
+    reasons.push('BLOCKER finding(s) present');
+  }
+  if (truncated) {
+    effectiveConfidence = Math.min(effectiveConfidence, 50);
+    reasons.push('diff truncated (> max_diff_lines)');
+  }
+  if (touchesDb) {
+    effectiveConfidence = Math.min(effectiveConfidence, 70);
+    reasons.push('database path touched');
+  }
+  if (hasWarning) {
+    effectiveConfidence = Math.min(effectiveConfidence, 75);
+    reasons.push('WARNING finding(s) present');
+  }
+  if (effectiveConfidence <= threshold && reasons.length === 0) {
+    reasons.push(`model confidence ${effectiveConfidence}% <= ${threshold}% threshold`);
+  }
+
+  let action = 'ESCALATE';
+  if (ciFailed || hasBlocker) {
+    action = 'BLOCK';
+  } else if (effectiveConfidence > threshold) {
+    action = 'AUTO_MERGE';
+  }
+
+  const escalateTo = action === 'ESCALATE'
+    ? (touchesDb ? dbEscalationTag : escalationTag)
+    : '';
+
+  return {
+    action,
+    rawConfidence,
+    effectiveConfidence,
+    threshold,
+    reasons,
+    escalateTo,
+  };
 }
 
 // Set of new-file line numbers visible in a unified-diff patch (RIGHT side).
@@ -87,10 +158,15 @@ function formatFinding(f) {
   return `**[${f.severity}]** \`${f.file}:${f.line}\`: ${f.message}`;
 }
 
-function renderSticky({ header, summary, inlineCount, rest, dropped }) {
+function renderSticky({ header, summary, inlineCount, rest, dropped, decision }) {
   const out = [STICKY_MARKER];
   if (header) out.push(header);
   out.push('', '## Summary', summary);
+  if (decision) {
+    const reasonStr = decision.reasons && decision.reasons.length > 0 ? ` — ${decision.reasons.join(', ')}` : '';
+    const ccStr = decision.escalateTo ? ` — cc ${decision.escalateTo}` : '';
+    out.push('', `**Decision:** \`${decision.action}\` (confidence: ${decision.effectiveConfidence}%${reasonStr})${ccStr}`);
+  }
   if (inlineCount > 0) out.push('', `${inlineCount} finding(s) posted as inline comments.`);
   if (rest.length > 0) {
     out.push('', '## Findings');
@@ -121,6 +197,6 @@ function renderInline(f) {
 
 module.exports = {
   SEVERITIES, MAX_FINDINGS, INLINE_MARKER, STICKY_MARKER,
-  parseFindings, changedLines, partition,
+  parseFindings, evaluateDecision, changedLines, partition,
   renderSticky, renderFallback, renderInline,
 };

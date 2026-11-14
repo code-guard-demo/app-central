@@ -124,3 +124,57 @@ test('renderFallback never contains raw code fence breakouts', () => {
   const out = lib.renderFallback({ header: '', raw: 'x ``` y', error: 'e' });
   assert.strictEqual(out.split('```').length, 3);
 });
+
+test('parseFindings extracts clamped confidence and defaults cleanly', () => {
+  assert.strictEqual(lib.parseFindings('{"summary":"ok","confidence":94,"findings":[]}').confidence, 94);
+  assert.strictEqual(lib.parseFindings('{"summary":"ok","confidence":150,"findings":[]}').confidence, 100);
+  assert.strictEqual(lib.parseFindings('{"summary":"ok","findings":[]}').confidence, 90);
+  assert.strictEqual(lib.parseFindings(JSON.stringify(good)).confidence, 50);
+});
+
+test('evaluateDecision auto-merges only when clean and above threshold', () => {
+  const d = lib.evaluateDecision({ findings: [], rawConfidence: 92, ciResult: 'success', truncated: false, touchesDb: false, threshold: 80 });
+  assert.strictEqual(d.action, 'AUTO_MERGE');
+  assert.strictEqual(d.effectiveConfidence, 92);
+  assert.strictEqual(d.escalateTo, '');
+});
+
+test('evaluateDecision escalates with deterministic caps when unsure', () => {
+  const truncated = lib.evaluateDecision({ findings: [], rawConfidence: 95, ciResult: 'success', truncated: true });
+  assert.strictEqual(truncated.action, 'ESCALATE');
+  assert.strictEqual(truncated.effectiveConfidence, 50);
+  assert.strictEqual(truncated.escalateTo, '@org/reviewer-oncall');
+
+  const db = lib.evaluateDecision({ findings: [], rawConfidence: 95, ciResult: 'success', touchesDb: true });
+  assert.strictEqual(db.action, 'ESCALATE');
+  assert.strictEqual(db.effectiveConfidence, 70);
+  assert.strictEqual(db.escalateTo, '@org/db-admins');
+
+  const warn = lib.evaluateDecision({
+    findings: [{ file: 'a.js', line: 1, severity: 'WARNING', message: 'check' }],
+    rawConfidence: 95,
+    ciResult: 'success',
+  });
+  assert.strictEqual(warn.action, 'ESCALATE');
+  assert.strictEqual(warn.effectiveConfidence, 75);
+
+  const low = lib.evaluateDecision({ findings: [], rawConfidence: 79, ciResult: 'success', threshold: 80 });
+  assert.strictEqual(low.action, 'ESCALATE');
+  assert.strictEqual(low.effectiveConfidence, 79);
+});
+
+test('evaluateDecision blocks on CI failure or BLOCKER finding', () => {
+  const ciFail = lib.evaluateDecision({ findings: [], rawConfidence: 99, ciResult: 'failure' });
+  assert.strictEqual(ciFail.action, 'BLOCK');
+  assert.strictEqual(ciFail.effectiveConfidence, 0);
+
+  const blocker = lib.evaluateDecision({ findings: good.findings, rawConfidence: 99, ciResult: 'success' });
+  assert.strictEqual(blocker.action, 'BLOCK');
+  assert.strictEqual(blocker.effectiveConfidence, 0);
+});
+
+test('renderSticky includes decision line when provided', () => {
+  const decision = lib.evaluateDecision({ findings: [], rawConfidence: 95, truncated: true });
+  const out = lib.renderSticky({ header: '[h]', summary: 'ok', inlineCount: 0, rest: [], dropped: 0, decision });
+  assert.ok(out.includes('**Decision:** `ESCALATE` (confidence: 50% — diff truncated (> max_diff_lines)) — cc @org/reviewer-oncall'));
+});
