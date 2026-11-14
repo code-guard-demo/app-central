@@ -41,7 +41,7 @@ jobs:
             Review this pull request's diff for bugs. Be concise.
             Use `gh pr diff` to read the diff. Post one summary comment with
             `gh pr comment`. If you find no real problems, say so briefly.
-            Do not comment on style.
+            Do not comment on style. Start your comment with the line "[central v0.2]".
           claude_args: |
             --max-turns 8
             --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Read,Grep,Glob"
