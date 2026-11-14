@@ -91,7 +91,7 @@ Secrets: `SKILLS_REPO_TOKEN` (required read token for `app-central` if private) 
 
 ## Security & Access Control
 
-- **Repository lock:** Access is restricted to owner `aethv` via GitHub org interaction limits (`collaborators_only`), `main` branch push restrictions, active branch protection ruleset across all branches, `actions/permissions` (`sha_pinning_required: true`), and the workflow `allowed_user: "aethv"` guard.
+- **Repository lock:** Access is restricted to owner `aethv` via GitHub repository interaction limits (`collaborators_only`), `main` branch push restrictions, active branch protection ruleset across all branches (`~ALL`), `actions/permissions` (`sha_pinning_required: true`), and the workflow `allowed_user: "aethv"` guard.
 - **Sandboxed agents:** Claude runs with `--disallowedTools "Bash"`; Gemini runs with no `GH_TOKEN`, `GEMINI_CLI_TRUST_WORKSPACE: "true"`, and overwritten `settings` (`telemetry: false`) so PR branches cannot inject CLI config.
 - **Pinned actions:** Every external GitHub Action in `reusable-review.yml` is pinned by full commit SHA.
 - **Untrusted input isolation:** PR titles/comments pass through `env:` variables and `--body-file` / JSON files rather than shell interpolation, and all model output goes through `parseFindings` (marker spoofing stripped, capped at `20` findings) and deterministic `evaluateDecision` caps.
