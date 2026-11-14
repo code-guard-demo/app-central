@@ -1,0 +1,47 @@
+name: Reusable AI Reviewer
+
+on:
+  workflow_call:
+    inputs:
+      provider:
+        required: false
+        type: string
+        default: "claude"
+      model:
+        required: false
+        type: string
+        default: ""
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Claude review
+        if: inputs.provider == 'claude'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Review this pull request's diff for bugs. Be concise.
+            Use `gh pr diff` to read the diff. Post one summary comment with
+            `gh pr comment`. If you find no real problems, say so briefly.
+            Do not comment on style.
+          claude_args: |
+            --max-turns 8
+            --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Read,Grep,Glob"
