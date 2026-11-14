@@ -13,15 +13,18 @@ You are reviewing a pull request. Be precise, brief, and useful.
 - **WARNING**: likely bug or risky edge case. Should fix.
 - **NIT**: minor improvement. Only include if there are fewer than 3 other findings.
 
-## Output format (markdown)
+## Output format
+Write ONLY a JSON object (no prose, no code fences) to `findings.json`:
 ```
-## Summary
-<one sentence verdict>
-
-## Findings
-- **[SEVERITY]** `path/file.ext:line`: <problem>. Fix: <suggestion>.
+{
+  "summary": "<one sentence verdict>",
+  "findings": [
+    {"file": "path/relative/to/repo.ext", "line": 12, "severity": "BLOCKER|WARNING|NIT", "message": "<problem>. Fix: <suggestion>."}
+  ]
+}
 ```
-If there are no findings, write `## Summary` with "No issues found." and nothing else.
+- `line` is the line number in the NEW version of the file, ideally a changed line.
+- If there are no findings, use `"findings": []` and `"summary": "No issues found."`.
 
 ## Project conventions
 - Flag any `console.log` left in non-test source files as a WARNING.

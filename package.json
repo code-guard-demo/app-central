@@ -1,0 +1,5 @@
+{
+  "name": "app-central",
+  "private": true,
+  "scripts": { "test": "node --test scripts/test/" }
+}
