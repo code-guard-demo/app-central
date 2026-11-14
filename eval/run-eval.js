@@ -11,7 +11,7 @@ const ROOT = path.resolve(__dirname, '..');
 function loadRules(skillNames, agentsOverride) {
   const parts = [agentsOverride || fs.readFileSync(path.join(ROOT, 'AGENTS.md'), 'utf8')];
   for (const name of skillNames) {
-    const file = path.join(ROOT, 'skills', `${name}-review`, 'SKILL.md`);
+    const file = path.join(ROOT, 'skills', `${name}-review`, 'SKILL.md');
     if (fs.existsSync(file)) parts.push(fs.readFileSync(file, 'utf8'));
   }
   return parts.join('\n\n---\n\n');
