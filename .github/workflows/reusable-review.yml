@@ -86,27 +86,89 @@ jobs:
   # Gate: skip forks and doc-only PRs ($0 spend)
   # ---------------------------------------------------------
   gate:
-    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    if: |
+      (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
+      (
+        github.event_name == 'issue_comment' &&
+        github.event.issue.pull_request != null &&
+        github.event.comment.user.type != 'Bot' &&
+        !contains(github.event.comment.body, '<!-- ai-review') &&
+        (
+          contains(github.event.comment.body, '@ai-review review') ||
+          contains(github.event.comment.body, '@ai-review re-review') ||
+          contains(github.event.comment.body, '@ai-review recheck')
+        )
+      )
     runs-on: ubuntu-latest
     outputs:
       has_code: ${{ steps.files.outputs.has_code }}
       touches_db: ${{ steps.files.outputs.touches_db }}
       touches_ui: ${{ steps.files.outputs.touches_ui }}
+      pr_number: ${{ steps.files.outputs.pr_number }}
+      head_sha: ${{ steps.files.outputs.head_sha }}
+      head_ref: ${{ steps.files.outputs.head_ref }}
     steps:
       - name: Detect non-doc changes
         id: files
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
           DB_PATHS: ${{ inputs.db_paths }}
           UI_PATHS: ${{ inputs.ui_paths }}
           IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
           SIMULATE_FORK: ${{ inputs.simulate_fork }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          COMMENT_USER: ${{ github.event.comment.user.login }}
+          AUTHOR_ASSOC: ${{ github.event.comment.author_association }}
           ALLOWED_USER: ${{ inputs.allowed_user }}
         run: |
           set -euo pipefail
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
+          if [ "$EVENT_NAME" = "issue_comment" ]; then
+            if [ -n "$ALLOWED_USER" ] && [ "$COMMENT_USER" != "$ALLOWED_USER" ]; then
+              echo "::notice::Ignoring @ai-review trigger from $COMMENT_USER (only $ALLOWED_USER is allowed)."
+              echo "has_code=false" >> "$GITHUB_OUTPUT"
+              echo "touches_db=false" >> "$GITHUB_OUTPUT"
+              echo "touches_ui=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            case "$AUTHOR_ASSOC" in
+              OWNER|MEMBER|COLLABORATOR) ;;
+              *)
+                PERM=$(gh api "repos/$REPO/collaborators/$COMMENT_USER/permission" --jq .permission 2>/dev/null || echo "none")
+                if [ "$PERM" != "admin" ] && [ "$PERM" != "write" ]; then
+                  echo "::notice::Untrusted commenter $COMMENT_USER ($AUTHOR_ASSOC / $PERM); skipping review."
+                  echo "has_code=false" >> "$GITHUB_OUTPUT"
+                  echo "touches_db=false" >> "$GITHUB_OUTPUT"
+                  echo "touches_ui=false" >> "$GITHUB_OUTPUT"
+                  exit 0
+                fi
+                ;;
+            esac
+            PR_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER")
+            PR_STATE=$(printf '%s' "$PR_JSON" | node -e 'const d = JSON.parse(require("fs").readFileSync(0,"utf8")); console.log(d.state);')
+            PR_DRAFT=$(printf '%s' "$PR_JSON" | node -e 'const d = JSON.parse(require("fs").readFileSync(0,"utf8")); console.log(String(Boolean(d.draft)));')
+            if [ "$PR_STATE" != "open" ] || [ "$PR_DRAFT" = "true" ]; then
+              echo "::notice::PR #$PR_NUMBER is $PR_STATE (draft=$PR_DRAFT); skipping re-review."
+              echo "has_code=false" >> "$GITHUB_OUTPUT"
+              echo "touches_db=false" >> "$GITHUB_OUTPUT"
+              echo "touches_ui=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            IS_FORK=$(printf '%s' "$PR_JSON" | node -e 'const d = JSON.parse(require("fs").readFileSync(0,"utf8")); console.log(String(Boolean(d.head && d.head.repo && d.head.repo.fork)));')
+            PR_AUTHOR=$(printf '%s' "$PR_JSON" | node -e 'const d = JSON.parse(require("fs").readFileSync(0,"utf8")); console.log(d.user ? d.user.login : "");')
+            HEAD_SHA=$(printf '%s' "$PR_JSON" | node -e 'const d = JSON.parse(require("fs").readFileSync(0,"utf8")); console.log(d.head ? d.head.sha : "");')
+            HEAD_REF=$(printf '%s' "$PR_JSON" | node -e 'const d = JSON.parse(require("fs").readFileSync(0,"utf8")); console.log(d.head ? d.head.ref : "");')
+          fi
+
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "head_ref=$HEAD_REF" >> "$GITHUB_OUTPUT"
+
           if [ "$IS_FORK" = "true" ] || [ "$SIMULATE_FORK" = "true" ]; then
             echo "::notice::Skipping AI review for fork PR by security policy (secrets are not exposed to forks)."
             echo "has_code=false" >> "$GITHUB_OUTPUT"
@@ -144,6 +206,8 @@ jobs:
       result: ${{ steps.run.outputs.result }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.gate.outputs.head_ref }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ inputs.node_version }}
@@ -168,14 +232,15 @@ jobs:
   # ---------------------------------------------------------
   review:
     needs: [gate, ci]
-    if: always() && !cancelled() && github.event_name == 'pull_request' && needs.gate.outputs.has_code == 'true'
+    if: always() && !cancelled() && needs.gate.outputs.has_code == 'true'
     runs-on: ubuntu-latest
     concurrency:
-      group: ai-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+      group: ai-review-${{ github.repository }}-${{ needs.gate.outputs.pr_number }}
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ needs.gate.outputs.head_ref }}
           fetch-depth: 1
 
       - name: Get CI log (if any)
@@ -230,7 +295,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ needs.gate.outputs.pr_number }}
           MAX_DIFF_LINES: ${{ inputs.max_diff_lines }}
         run: |
           set -euo pipefail
@@ -247,7 +312,7 @@ jobs:
           github_token: ${{ github.token }}
           prompt: |
             REPO: ${{ github.repository }}
-            PR NUMBER: ${{ github.event.pull_request.number }}
+            PR NUMBER: ${{ needs.gate.outputs.pr_number }}
             STAGE-1 CI RESULT: ${{ needs.ci.result == 'success' && needs.ci.outputs.result || 'not run' }}
 
             ADDITIONAL SKILLS TO APPLY (read each file): ${{ steps.skills.outputs.list }}
@@ -296,8 +361,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ needs.gate.outputs.pr_number }}
+          HEAD_SHA: ${{ needs.gate.outputs.head_sha }}
           HEADER: "[central ${{ inputs.central_ref }} | ${{ inputs.provider }} | skills: ${{ steps.skills.outputs.names }} | CI: ${{ needs.ci.result == 'success' && needs.ci.outputs.result || 'not run' }}${{ steps.diff.outputs.diff_note }}]"
           CI_RESULT: ${{ needs.ci.result == 'success' && needs.ci.outputs.result || 'not run' }}
           TOUCHES_DB: ${{ needs.gate.outputs.touches_db }}
@@ -320,6 +385,9 @@ jobs:
       github.event.comment.user.type != 'Bot' &&
       !contains(github.event.comment.body, '<!-- ai-review') &&
       contains(github.event.comment.body, '@ai-review') &&
+      !contains(github.event.comment.body, '@ai-review review') &&
+      !contains(github.event.comment.body, '@ai-review re-review') &&
+      !contains(github.event.comment.body, '@ai-review recheck') &&
       (
         github.event_name == 'pull_request_review_comment' ||
         contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)

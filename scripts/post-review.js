@@ -55,13 +55,15 @@ async function upsertSticky(body, existingComment = undefined) {
   else await api('POST', `/repos/${REPO}/issues/${PR_NUMBER}/comments`, { body });
 }
 
-async function clearOldInlineComments() {
+async function getExistingInlineComments() {
+  if (DRY_RUN) return [];
   try {
-    const old = await paginate(`/repos/${REPO}/pulls/${PR_NUMBER}/comments`);
-    for (const c of old.filter((c) => c.body && c.body.includes(lib.INLINE_MARKER))) {
-      await api('DELETE', `/repos/${REPO}/pulls/comments/${c.id}`).catch((e) => console.log(`::warning::${e.message}`));
-    }
-  } catch (e) { console.log(`::warning::cleanup failed: ${e.message}`); }
+    const all = await paginate(`/repos/${REPO}/pulls/${PR_NUMBER}/comments`);
+    return all.filter((c) => c.body && c.body.includes(lib.INLINE_MARKER));
+  } catch (e) {
+    console.log(`::warning::failed to list inline comments: ${e.message}`);
+    return [];
+  }
 }
 
 async function main() {
@@ -94,12 +96,17 @@ async function main() {
 
   if (decision.action === 'AUTO_MERGE') {
     if (!DRY_RUN) {
-      await clearOldInlineComments();
       const existing = await findStickyComment();
       if (existing) {
-        await upsertSticky(lib.renderSticky({
-          header: HEADER, summary: parsed.summary, inlineCount: 0, rest: parsed.findings, dropped: parsed.dropped, decision,
-        }), existing);
+        const resolvedBody = lib.renderSticky({
+          header: HEADER,
+          summary: `${parsed.summary} (All previous review findings resolved in \`${HEAD_SHA ? HEAD_SHA.slice(0, 7) : 'latest'}\`.)`,
+          inlineCount: 0,
+          rest: parsed.findings,
+          dropped: parsed.dropped,
+          decision,
+        });
+        await api('POST', `/repos/${REPO}/issues/${PR_NUMBER}/comments`, { body: resolvedBody });
       }
       if (AUTO_MERGE === 'true') {
         try {
@@ -126,14 +133,20 @@ async function main() {
     for (const f of files) diffMap[f.filename] = lib.changedLines(f.patch);
     ({ inline, rest } = lib.partition(parsed.findings, diffMap));
 
-    await clearOldInlineComments();
+    const existingInline = await getExistingInlineComments();
+    const existingKeys = new Set(
+      existingInline.map((c) => `${c.path}:${c.line || c.original_line}:${String(c.body).trim()}`)
+    );
+    const toPost = inline.filter(
+      (f) => !existingKeys.has(`${f.file}:${f.line}:${lib.renderInline(f).trim()}`)
+    );
 
-    if (inline.length > 0) {
+    if (toPost.length > 0) {
       try {
         await api('POST', `/repos/${REPO}/pulls/${PR_NUMBER}/reviews`, {
           commit_id: HEAD_SHA,
           event: 'COMMENT',
-          comments: inline.map((f) => ({ path: f.file, line: f.line, side: 'RIGHT', body: lib.renderInline(f) })),
+          comments: toPost.map((f) => ({ path: f.file, line: f.line, side: 'RIGHT', body: lib.renderInline(f) })),
         });
       } catch (e) {
         console.log(`::warning::inline review failed, folding into summary: ${e.message}`);
