@@ -4,6 +4,10 @@ Central reusable GitHub Actions workflow, review rules (`AGENTS.md`), domain ski
 
 ## Architecture
 
+![Architecture Diagram](./docs/architecture.drawio.svg)
+
+> Editable source: [docs/architecture.drawio](./docs/architecture.drawio) (open in [app.diagrams.net](https://app.diagrams.net/) or the VS Code Draw.io extension).
+
 ```mermaid
 flowchart TD
     EV1["PR Event (opened, synchronize, ready_for_review)"] --> GATE
