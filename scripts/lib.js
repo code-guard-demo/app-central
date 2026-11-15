@@ -93,10 +93,6 @@ function evaluateDecision({
     effectiveConfidence = Math.min(effectiveConfidence, 50);
     reasons.push('diff truncated (> max_diff_lines)');
   }
-  if (touchesDb) {
-    effectiveConfidence = Math.min(effectiveConfidence, 70);
-    reasons.push('database path touched');
-  }
   if (hasWarning) {
     effectiveConfidence = Math.min(effectiveConfidence, 75);
     reasons.push('WARNING finding(s) present');

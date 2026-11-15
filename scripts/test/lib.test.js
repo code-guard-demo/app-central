@@ -137,6 +137,11 @@ test('evaluateDecision auto-merges only when clean and above threshold', () => {
   assert.strictEqual(d.action, 'AUTO_MERGE');
   assert.strictEqual(d.effectiveConfidence, 92);
   assert.strictEqual(d.escalateTo, '');
+
+  const dbClean = lib.evaluateDecision({ findings: [], rawConfidence: 95, ciResult: 'success', truncated: false, touchesDb: true, threshold: 80 });
+  assert.strictEqual(dbClean.action, 'AUTO_MERGE');
+  assert.strictEqual(dbClean.effectiveConfidence, 95);
+  assert.strictEqual(dbClean.escalateTo, '');
 });
 
 test('evaluateDecision escalates with deterministic caps when unsure', () => {
@@ -145,9 +150,14 @@ test('evaluateDecision escalates with deterministic caps when unsure', () => {
   assert.strictEqual(truncated.effectiveConfidence, 50);
   assert.strictEqual(truncated.escalateTo, '@org/reviewer-oncall');
 
-  const db = lib.evaluateDecision({ findings: [], rawConfidence: 95, ciResult: 'success', touchesDb: true });
+  const db = lib.evaluateDecision({
+    findings: [{ file: 'db/migrations/001.sql', line: 1, severity: 'WARNING', message: 'missing rollback' }],
+    rawConfidence: 95,
+    ciResult: 'success',
+    touchesDb: true,
+  });
   assert.strictEqual(db.action, 'ESCALATE');
-  assert.strictEqual(db.effectiveConfidence, 70);
+  assert.strictEqual(db.effectiveConfidence, 75);
   assert.strictEqual(db.escalateTo, '@org/db-admins');
 
   const warn = lib.evaluateDecision({
