@@ -11,7 +11,8 @@ Central reusable GitHub Actions workflow, review rules (`AGENTS.md`), domain ski
 ```mermaid
 flowchart TD
     EV1["PR Event (opened, synchronize, ready_for_review)"] --> GATE
-    EV2["Comment Event (@ai-review on PR / inline thread)"] --> REPLY
+    EV2["@ai-review review / re-review / recheck comment"] --> GATE
+    EV3["@ai-review question (PR / inline thread)"] --> REPLY
 
     subgraph GATE["gate job"]
         G1{"Fork PR?"}
@@ -30,16 +31,16 @@ flowchart TD
         R2["filter-diff.js: strip lockfiles/dist + cap 500 lines"]
         R3{"provider input"}
         R4["Claude (no Bash) -> findings.json"]
-        R5["Gemini (no GH_TOKEN) -> findings.json"]
+        R5["Gemini via npx (no GH_TOKEN) -> findings.json"]
         R6["scripts/post-review.js + evaluateDecision"]
         R1 --> R2 --> R3
         R3 -- claude --> R4 --> R6
         R3 -- gemini --> R5 --> R6
     end
 
-    R6 --> D1["AUTO_MERGE: confidence > 80%, clean CI -> silent squash merge (0 comments)"]
-    R6 --> D2["ESCALATE: <= 80%, truncated, DB, or WARNING -> tag @org/reviewer-oncall or @org/db-admins"]
-    R6 --> D3["BLOCK: CI failed or BLOCKER -> post inline diff comments + sticky summary"]
+    R6 --> D1["AUTO_MERGE: confidence > 80%, clean CI -> squash merge (silent if clean; follow-up comment if resolving BLOCK)"]
+    R6 --> D2["ESCALATE: <= 80%, truncated, or WARNING -> tag @org/reviewer-oncall or @org/db-admins"]
+    R6 --> D3["BLOCK: CI failed or BLOCKER -> post inline diff comments + sticky summary (preserved on fix)"]
 
     subgraph REPLY["reply job"]
         P1{"Collaborator + no bot loop?"}
@@ -48,14 +49,14 @@ flowchart TD
     end
 ```
 
-1. **`gate`** — Skips fork PRs and doc-only PRs (`*.md`, `*.txt`, `*.rst`, `docs/`, `LICENSE`) at $0 LLM spend. Detects `touches_db` and `touches_ui` via path regexes.
+1. **`gate`** — Skips fork PRs and doc-only PRs (`*.md`, `*.txt`, `*.rst`, `docs/`, `LICENSE`) at $0 LLM spend. Accepts both `pull_request` events and manual `@ai-review review` / `@ai-review re-review` / `@ai-review recheck` PR comments from allowed collaborators. Detects `touches_db` and `touches_ui` via path regexes.
 2. **`ci`** — Runs the caller's `ci_command` (e.g., `npm run lint && npm test`), captures the last 200 log lines as artifact `ci-log` (`ci-tail.log`), and passes the status (`success` / `failure`) into `review`.
 3. **`review`** — Downloads central rules (`AGENTS.md`), selects matching skills (`db-review` / `ui-review`), filters out lockfiles/generated artifacts and bounds the diff (`scripts/filter-diff.js`, default `max_diff_lines: 500`), runs the selected provider (`claude` or `gemini`) in read-only mode writing `findings.json`, and hands off to `scripts/post-review.js`.
 4. **3-Tier Decision Gate (`scripts/lib.js` + `scripts/post-review.js`)**:
-   - **`AUTO_MERGE`**: `CI` is not failed, zero `BLOCKER` or `WARNING` findings, diff was not truncated, `touches_db == false`, and `confidence > score_threshold` (default `80%`). Squashes & merges silently (`0` comments unless updating an existing `<!-- ai-review -->` sticky comment to resolved).
-   - **`ESCALATE`**: No `BLOCKER`s, but uncertain (`truncated` caps confidence at `50%`, `touches_db` at `70%`, `WARNING` at `75%`, or raw `confidence <= 80%`). Leaves the PR open, posts findings, and tags `@org/reviewer-oncall` (or `@org/db-admins` for DB changes).
-   - **`BLOCK`**: `CI` failed or at least one `BLOCKER` finding exists. Posts inline review comments inside changed diff hunks and updates the sticky summary.
-5. **`reply`** — Responds in-thread (`pull_request_review_comment` or `issue_comment` on a PR) when `@ai-review` is mentioned by a repository collaborator (`admin` / `write`) outside bot loops.
+   - **`AUTO_MERGE`**: `CI` is not failed, zero `BLOCKER` or `WARNING` findings, diff was not truncated, and `confidence > score_threshold` (default `80%`, including clean DB/UI PRs). Squashes & merges silently (`0` comments) when clean on first push; when resolving a previously `BLOCK`/`ESCALATE` PR, leaves the original inline comments and `BLOCK` report intact and posts a new follow-up `AUTO_MERGE` resolution comment.
+   - **`ESCALATE`**: No `BLOCKER`s, but uncertain (`truncated` caps confidence at `50%`, `WARNING` at `75%`, or raw `confidence <= 80%`). Leaves the PR open, posts findings, and tags `@org/reviewer-oncall` (or `@org/db-admins` when `touches_db == true`).
+   - **`BLOCK`**: `CI` failed or at least one `BLOCKER` finding exists. Posts deduplicated inline review comments inside changed diff hunks (kept permanently for auditability) and updates the `<!-- ai-review -->` summary.
+5. **`reply`** — Responds in-thread (`pull_request_review_comment` or `issue_comment` on a PR) when `@ai-review` is asked a question by a repository collaborator (`admin` / `write`) outside bot loops (re-review commands route to `gate → ci → review` instead).
 
 ## Repository Layout
 
@@ -101,10 +102,10 @@ permissions:
 
 jobs:
   ai-review:
-    uses: code-guard-demo/app-central/.github/workflows/reusable-review.yml@v1.2
+    uses: code-guard-demo/app-central/.github/workflows/reusable-review.yml@v1.4
     with:
       provider: "claude" # "claude" | "gemini"
-      central_ref: "v1.2"
+      central_ref: "v1.4"
       ci_command: "npm run lint && npm test"
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -121,7 +122,7 @@ jobs:
 | `model` | `""` | Optional model override |
 | `ci_command` | `""` | Stage-1 command to run before review (empty skips CI) |
 | `node_version` | `"20"` | Node.js version for `ci` and `post-review.js` |
-| `db_paths` | `^(db\|migrations)/\|\.sql$\|/models/\|/repositories/` | Regex triggering `db-review` skill and DB escalation cap |
+| `db_paths` | `^(db\|migrations)/\|\.sql$\|/models/\|/repositories/` | Regex triggering `db-review` skill and DB escalation routing |
 | `ui_paths` | `^src/(components\|pages)/\|\.(tsx\|jsx\|vue)$` | Regex triggering `ui-review` skill |
 | `db_escalation` | `"@org/db-admins"` | Tag mentioned when DB changes trigger escalation |
 | `simulate_fork` | `false` | Test flag to exercise the fork skip policy |
@@ -129,6 +130,7 @@ jobs:
 | `auto_merge` | `true` | Auto-merge via squash when `effectiveConfidence > score_threshold` |
 | `score_threshold` | `80` | Minimum effective confidence (`0–100`) for silent auto-merge |
 | `escalation_tag` | `"@org/reviewer-oncall"` | Tag mentioned on non-DB uncertain escalations |
+| `allowed_user` | `"aethv"` | Restrict PR reviews and `@ai-review` commands to this GitHub login (empty allows collaborators) |
 
 Secrets: `SKILLS_REPO_TOKEN` (required read token for `app-central` if private) plus `ANTHROPIC_API_KEY` or `GEMINI_API_KEY` matching `provider`.
 
